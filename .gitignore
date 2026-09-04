@@ -1,0 +1,23 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio cache
+.vs/
+
+# Run artifacts (config.json contains the access token)
+config.json
+logs/
+
+# User-specific files
+*.user
+*.suo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+Thumbs.db
+.DS_Store

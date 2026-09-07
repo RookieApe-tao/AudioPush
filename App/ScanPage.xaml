@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             x:Class="Audio2PhoneApp.ScanPage"
+             Title="扫码">
+
+    <Grid>
+        <zxing:CameraBarcodeReaderView x:Name="BarcodeReader"
+            IsDetecting="True"
+            IsTorchOn="False"
+            BarcodesDetected="OnBarcodesDetected" />
+
+        <!-- 顶部提示 -->
+        <Label Text="对准电脑屏幕上的二维码"
+               TextColor="White" FontSize="16"
+               HorizontalOptions="Center" VerticalOptions="Start"
+               Margin="0,60,0,0"
+               BackgroundColor="#80000000" Padding="16,8" />
+
+        <!-- 返回按钮 -->
+        <Button Text="✕ 取消" TextColor="White"
+                BackgroundColor="#80000000"
+                HorizontalOptions="Start" VerticalOptions="End"
+                Margin="24,0,0,40" Padding="16,8"
+                Clicked="OnCancelClicked" />
+    </Grid>
+
+</ContentPage>

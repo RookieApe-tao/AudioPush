@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <!-- 扬声器主体 -->
+    <path d="M 96 178 L 158 178 L 226 118 L 226 338 L 158 278 L 96 278 Z"
+          fill="#FFFFFF" stroke="#FFFFFF" stroke-width="18"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- 声波弧线 1 -->
+    <path d="M 272 162 A 82 82 0 0 1 272 294"
+          fill="none" stroke="#FFFFFF" stroke-width="22"
+          stroke-linecap="round"/>
+    <!-- 声波弧线 2 -->
+    <path d="M 316 122 A 138 138 0 0 1 316 334"
+          fill="none" stroke="#B39DFF" stroke-width="22"
+          stroke-linecap="round"/>
+</svg>

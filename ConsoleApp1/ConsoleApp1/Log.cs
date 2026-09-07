@@ -11,6 +11,7 @@ public static class Log
     public static void Info(string msg) => Write("INFO", msg);
     public static void Warn(string msg) => Write("WARN", msg);
     public static void Error(string msg) => Write("ERRO", msg);
+    public static void Debug(string msg) => Write("DBUG", msg);
 
     static void Write(string level, string msg)
     {

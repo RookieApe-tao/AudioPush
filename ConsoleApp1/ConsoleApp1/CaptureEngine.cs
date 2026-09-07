@@ -17,6 +17,9 @@ public sealed class CaptureEngine : IDisposable
     readonly object _pcmGate = new();      // 序列化 lame.Write 与 Dispose
     Task? _loop;
 
+    /// <summary>PCM 分接（int16 交叠，≤2 声道，设备混音率），供 WebRTC 低延迟通道使用。</summary>
+    public event Action<int, byte[]>? Pcm16Captured;
+
     WasapiLoopbackCapture? _capture;
     LameMP3FileWriter? _lame;
     HubStream? _sink;
@@ -116,6 +119,7 @@ public sealed class CaptureEngine : IDisposable
         {
             byte[] pcm16 = ConvertToPcm16(e.Buffer, e.BytesRecorded, fmt);
             if (fmt.Channels > 2) pcm16 = KeepFrontStereo(pcm16, fmt.Channels);
+            Pcm16Captured?.Invoke(fmt.SampleRate, pcm16);   // 分接给 WebRTC 通道（如有订阅）
             lock (_pcmGate)
             {
                 if (_lame != null) _lame.Write(pcm16, 0, pcm16.Length);   // MP3 经 HubStream 进广播

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:zxing="clr-namespace:ZXing.Net.Maui.Controls;assembly=ZXing.Net.MAUI.Controls"
+             x:Class="Audio2PhoneApp.MainPage"
+             Title="audio2phone">
+
+    <ScrollView Padding="24,16">
+        <VerticalStackLayout Spacing="16">
+
+            <Label Text="🔊 电脑声音"
+                   FontSize="28" FontAttributes="Bold"
+                   HorizontalOptions="Center" />
+
+            <!-- 扫码按钮 -->
+            <Button x:Name="ScanBtn" Text="📷 扫码连接（推荐）"
+                    FontSize="16" Padding="0,12"
+                    BackgroundColor="#2196F3" TextColor="White"
+                    Clicked="OnScanClicked"
+                    HorizontalOptions="Fill" />
+
+            <Label Text="── 或手动输入 ──" FontSize="13" TextColor="#aaa"
+                   HorizontalOptions="Center" />
+
+            <!-- 连接配置 -->
+            <Frame BorderColor="#ddd" CornerRadius="8" Padding="16">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="电脑地址" FontSize="14" TextColor="#666" />
+                    <Entry x:Name="HostEntry" Placeholder="192.168.1.100" Text="" />
+
+                    <Label Text="端口" FontSize="14" TextColor="#666" />
+                    <Entry x:Name="PortEntry" Placeholder="8818"
+                           Keyboard="Numeric" Text="8818" />
+
+                    <Label Text="令牌 Token" FontSize="14" TextColor="#666" />
+                    <Entry x:Name="TokenEntry" Placeholder="xxxxxxxx" Text="" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- 连接按钮 -->
+            <Button x:Name="ConnectBtn" Text="连接"
+                    FontSize="18" Padding="0,14"
+                    BackgroundColor="#4CAF50" TextColor="White"
+                    Clicked="OnConnectClicked"
+                    HorizontalOptions="Fill" />
+
+            <!-- 状态 -->
+            <Label x:Name="StatusLabel" Text="未连接"
+                   FontSize="14" TextColor="#888"
+                   HorizontalOptions="Center" />
+
+            <!-- 音量 -->
+            <Frame BorderColor="#ddd" CornerRadius="8" Padding="16">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="音量" FontSize="14" TextColor="#666" />
+                    <Slider x:Name="VolumeSlider" Minimum="0" Maximum="1"
+                            Value="0.8" ValueChanged="OnVolumeChanged" />
+                </VerticalStackLayout>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

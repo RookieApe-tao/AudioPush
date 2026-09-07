@@ -21,6 +21,9 @@ public partial class MainPage : ContentPage
     IOpusDecoder? _decoder;
     Task? _receiveTask;
     bool _connected;
+    bool _autoReconnect;
+    long _lastDataTicks;
+    const int StallTimeoutMs = 10_000;   // 10 秒没收到任何音频帧 → 判定假死，自动重连
 
     public MainPage()
     {
@@ -104,10 +107,18 @@ public partial class MainPage : ContentPage
     {
         if (_connected)
         {
+            _autoReconnect = false;   // 手动断开，不自动重连
             Disconnect();
             return;
         }
 
+        _autoReconnect = true;        // 手动连接后启用自动重连
+        await ConnectAsync();
+    }
+
+    /// <summary>建立 WebSocket 连接并开始播放。silent=true 时不弹错误框（自动重连用）。</summary>
+    async Task ConnectAsync(bool silent = false)
+    {
         var host = (HostEntry.Text ?? "").Trim();
         var port = (PortEntry.Text ?? "8818").Trim();
         var token = (TokenEntry.Text ?? "").Trim();
@@ -228,24 +239,78 @@ public partial class MainPage : ContentPage
             // 启动前台服务保活（防止锁屏后系统冻结网络）
             StartForegroundService();
 
+            // 断流检测基准 + 看门狗（10 秒没音频帧 → 自动断开重连）
+            _lastDataTicks = Environment.TickCount64;
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+            _ = Task.Run(() => WatchdogLoopAsync(_cts.Token));
         }
         catch (OperationCanceledException)
         {
             StatusLabel.Text = "连接超时";
-            await ShowAlertSafe("连接失败", $"连接超时：无法连上 {host}:{port}\n请确认电脑端正在运行、IP 正确且手机与电脑在同一网络。");
+            if (!silent)
+                await ShowAlertSafe("连接失败", $"连接超时：无法连上 {host}:{port}\n请确认电脑端正在运行、IP 正确且手机与电脑在同一网络。");
             Disconnect();
         }
         catch (Exception ex)
         {
             Android.Util.Log.Error("A2P", $"ERROR: {ex}");
             StatusLabel.Text = $"连接失败: {ex.GetType().Name}: {ex.Message}";
-            await ShowAlertSafe("连接失败", $"{ex.Message}");
+            if (!silent)
+                await ShowAlertSafe("连接失败", $"{ex.Message}");
             Disconnect();
         }
         finally
         {
             SetConnecting(false);
+        }
+    }
+
+    // ---- 断流看门狗：连接保持着但长时间没有音频帧 → 自动断开重连 ----
+
+    async Task WatchdogLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(3000, ct);
+                if (!_connected) continue;
+
+                long idle = Environment.TickCount64 - Volatile.Read(ref _lastDataTicks);
+                if (idle < StallTimeoutMs) continue;
+
+                Android.Util.Log.Warn("A2P", $"No audio data for {idle}ms -> auto reconnect");
+                MainThread.BeginInvokeOnMainThread(() =>
+                    StatusLabel.Text = "长时间未收到音频，自动重连…");
+                Disconnect();
+                break;
+            }
+        }
+        catch (OperationCanceledException) { }
+
+        // 自动重连（静默模式，最多 30 次）
+        var attempts = 0;
+        while (_autoReconnect && !_connected && attempts < 30 && _cts?.IsCancellationRequested != true)
+        {
+            attempts++;
+            MainThread.BeginInvokeOnMainThread(() =>
+                StatusLabel.Text = $"自动重连…（第 {attempts} 次）");
+            try { await Task.Delay(2000); } catch { return; }
+            if (!_autoReconnect || _connected) return;
+            try
+            {
+                await MainThread.InvokeOnMainThreadAsync(() => ConnectAsync(silent: true));
+            }
+            catch (Exception ex)
+            {
+                Android.Util.Log.Warn("A2P", $"reconnect attempt {attempts}: {ex.Message}");
+            }
+        }
+        if (attempts >= 30 && !_connected)
+        {
+            _autoReconnect = false;
+            MainThread.BeginInvokeOnMainThread(() =>
+                StatusLabel.Text = "自动重连失败，请手动点「连接」");
         }
     }
 
@@ -321,6 +386,7 @@ public partial class MainPage : ContentPage
                 var pcmBytes = new byte[pcmLen];
                 Buffer.BlockCopy(pcmBuf, 0, pcmBytes, 0, pcmLen);
                 _audioTrack?.Write(pcmBytes, 0, pcmLen);
+                _lastDataTicks = Environment.TickCount64;   // 喂狗：收到音频帧
             }
         }
         catch (OperationCanceledException) { }

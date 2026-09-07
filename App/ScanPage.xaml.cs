@@ -1,3 +1,4 @@
+using ZXing.Net.Maui;
 using ZXing.Net.Maui.Controls;
 
 namespace Audio2PhoneApp;
@@ -11,35 +12,25 @@ public partial class ScanPage : ContentPage
     {
         InitializeComponent();
         _onScanned = onScanned;
-        BarcodeReader.BarcodesDetected += OnBarcodesDetected;
     }
 
-    void OnBarcodesDetected(object? sender, object e)
+    // XAML 已绑定 BarcodesDetected 事件
+    void OnBarcodesDetected(object? sender, BarcodeDetectionEventArgs e)
     {
         try
         {
             if (_handled) return;
 
-            string? value = null;
-            try
-            {
-                var results = (e as dynamic)?.Results;
-                if (results != null && results.Count > 0)
-                    value = (string?)results[0].Value;
-            }
-            catch (Exception ex)
-            {
-                Android.Util.Log.Warn("A2P", $"barcode dynamic parse: {ex.Message}");
-            }
-
-            if (string.IsNullOrEmpty(value) || _handled) return;
+            var first = e.Results?.FirstOrDefault();
+            if (first == null || string.IsNullOrEmpty(first.Value)) return;
             _handled = true;
 
+            var value = first.Value;
             MainThread.BeginInvokeOnMainThread(async () =>
             {
                 try
                 {
-                    _onScanned(value!);
+                    _onScanned(value);
                     await Navigation.PopAsync();
                 }
                 catch (Exception ex)

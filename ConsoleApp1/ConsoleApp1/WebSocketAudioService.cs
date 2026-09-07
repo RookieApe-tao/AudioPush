@@ -177,7 +177,13 @@ public sealed class WebSocketAudioService : IDisposable
                 await state.Socket.SendAsync(frame, WebSocketMessageType.Binary, true, _ct);
             }
         }
-        catch { }
+        catch
+        {
+            // 发送失败（客户端已死/网络无声断开）：中止套接字，
+            // 唤醒 AcceptClientAsync 阻塞中的 ReceiveAsync，统一走 finally 清理，
+            // 避免半开连接永久占用客户端名额
+            try { state.Socket.Abort(); } catch { }
+        }
     }
 
     public void Dispose()

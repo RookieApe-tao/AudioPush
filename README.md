@@ -1,4 +1,4 @@
-# audio2phone（yinpintuisong）
+﻿# audio2phone
 
 把 **Windows 全系统声音**（任何 App：视频、游戏、音乐、网页……）通过**局域网**实时推送到手机播放。
 适用于电脑没有音箱/耳机（或输出设备损坏）的场景，手机就是你的「无线音箱」。
@@ -19,7 +19,7 @@ CaptureEngine（NAudio 采集 + float→pcm16 转换，分接三路）
 仓库包含三套客户端：
 - **Android App（推荐）**：`App/` 目录，.NET MAUI，WebSocket 接收 Opus + AudioTrack 播放，
   后台 ForegroundService 保活，**息屏不断**，延迟约 100ms。
-- **C# 服务端**：`ConsoleApp1/` 解决方案，.NET 10，程序集名 `yinpintuisong`。
+- **C# 服务端**：`ConsoleApp1/` 解决方案，.NET 10，程序集名 `audio2phone`。
 - **Python 版（参考/备用实现）**：根目录 `audio2phone.py` 单文件脚本，依赖 `PyAudioWPatch` + `lameenc`，默认端口同为 8818。仅 MP3 兼容通道，无 WebRTC。
 
 ## 快速开始
@@ -27,7 +27,7 @@ CaptureEngine（NAudio 采集 + float→pcm16 转换，分接三路）
 1. **运行**（任选其一）：
    - Visual Studio 打开 `ConsoleApp1.slnx` 按 F5；
    - 命令行：`dotnet run --project ConsoleApp1\ConsoleApp1 -c Release`；
-   - 直接双击 `ConsoleApp1\ConsoleApp1\bin\Release\net10.0\yinpintuisong.exe`。
+   - 直接双击 `ConsoleApp1\ConsoleApp1\bin\Release\net10.0\audio2phone.exe`。
 2. 首次运行自动生成 `config.json`（含随机 **8 位访问令牌 Token**），控制台打印可访问地址和二维码。
 3. 手机连同一 Wi-Fi，选择播放方式：
    - **App（推荐）**：下载安装 `App\bin\Debug\net9.0-android\com.companyname.audio2phoneapp.apk`，

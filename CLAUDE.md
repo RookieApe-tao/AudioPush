@@ -1,10 +1,10 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
 ## 项目概述
 
-**audio2phone（yinpintuisong）**：把 Windows 全系统声音（任何 App 的混音）通过局域网实时推送到手机播放。适用于电脑没有音箱/耳机（或输出设备损坏）的场景，手机即「无线音箱」。
+**audio2phone**：把 Windows 全系统声音（任何 App 的混音）通过局域网实时推送到手机播放。适用于电脑没有音箱/耳机（或输出设备损坏）的场景，手机即「无线音箱」。
 
 核心链路（三通道）：
 ```
@@ -22,7 +22,7 @@ StreamServer（TcpListener 手写 HTTP + WebSocket，免管理员权限，token 
 
 仓库包含三套客户端：
 - **Android App（推荐）**：`App/` 目录，.NET MAUI，WebSocket 接收 Opus + AudioTrack 播放，后台 ForegroundService 保活，**息屏不断**，延迟约 100ms。
-- **C# 服务端**：`ConsoleApp1/` 解决方案，.NET 10（net10.0），程序集名 `yinpintuisong`。
+- **C# 服务端**：`ConsoleApp1/` 解决方案，.NET 10（net10.0），程序集名 `audio2phone`。
 - **Python 版（参考/备用实现）**：根目录 `audio2phone.py` 单文件脚本，依赖 `PyAudioWPatch` + `lameenc`，默认端口同为 8818。仅 MP3 兼容通道，无 WebRTC。
 
 ## 常用命令
@@ -31,7 +31,7 @@ StreamServer（TcpListener 手写 HTTP + WebSocket，免管理员权限，token 
 # 构建 & 运行（C# 主实现，任选其一）
 dotnet run --project ConsoleApp1/ConsoleApp1 -c Release
 # 或 Visual Studio 打开 ConsoleApp1/ConsoleApp1.slnx 按 F5
-# 或直接运行编译产物 ConsoleApp1/ConsoleApp1/bin/Release/net10.0/yinpintuisong.exe
+# 或直接运行编译产物 ConsoleApp1/ConsoleApp1/bin/Release/net10.0/audio2phone.exe
 
 # 构建 Android App
 dotnet build App/Audio2PhoneApp.csproj -f net9.0-android -c Debug

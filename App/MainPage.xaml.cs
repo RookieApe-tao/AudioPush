@@ -22,6 +22,9 @@ public partial class MainPage : ContentPage
     Task? _receiveTask;
     bool _connected;
     bool _autoReconnect;
+    bool _connecting;
+    bool _supervisorRunning;
+    int _reconnectAttempts;
     long _lastDataTicks;
     const int StallTimeoutMs = 10_000;   // 10 秒没收到任何音频帧 → 判定假死，自动重连
 
@@ -105,6 +108,8 @@ public partial class MainPage : ContentPage
 
     async void OnConnectClicked(object? sender, EventArgs e)
     {
+        if (_connecting) return;   // 防连点
+
         if (_connected)
         {
             _autoReconnect = false;   // 手动断开，不自动重连
@@ -113,6 +118,7 @@ public partial class MainPage : ContentPage
         }
 
         _autoReconnect = true;        // 手动连接后启用自动重连
+        StartSupervisor();            // 启动监督循环（只启动一次）
         await ConnectAsync();
     }
 
@@ -135,22 +141,26 @@ public partial class MainPage : ContentPage
         }
 
         SaveConfig();
+        _connecting = true;
         SetConnecting(true);
         StatusLabel.Text = "连接中…";
 
-        // Android 13+ 运行时申请通知权限（前台服务通知需要）
-        try
+        // Android 13+ 运行时申请通知权限（前台服务通知需要；静默重连时跳过）
+        if (!silent)
         {
-            var notifStatus = await Permissions.RequestAsync<Permissions.PostNotifications>();
-            Android.Util.Log.Info("A2P", $"Notification permission: {notifStatus}");
-        }
-        catch (Exception ex)
-        {
-            Android.Util.Log.Warn("A2P", $"Notification permission request failed: {ex.Message}");
-        }
+            try
+            {
+                var notifStatus = await Permissions.RequestAsync<Permissions.PostNotifications>();
+                Android.Util.Log.Info("A2P", $"Notification permission: {notifStatus}");
+            }
+            catch (Exception ex)
+            {
+                Android.Util.Log.Warn("A2P", $"Notification permission request failed: {ex.Message}");
+            }
 
-        // 请求忽略电池优化（防 MIUI/Doze 冻结网络），只弹一次系统框
-        RequestIgnoreBatteryOptimization();
+            // 请求忽略电池优化（防 MIUI/Doze 冻结网络），只弹一次系统框
+            RequestIgnoreBatteryOptimization();
+        }
 
         try
         {
@@ -210,7 +220,8 @@ public partial class MainPage : ContentPage
                 _tcp = null;
                 var reason = respText.Length > 0 ? respText.Split('\n')[0].Trim() : "无响应";
                 StatusLabel.Text = $"握手失败: {reason}";
-                await ShowAlertSafe("连接失败", $"服务端握手失败：{reason}\n请确认电脑端正在运行、Token 是否正确。");
+                if (!silent)
+                    await ShowAlertSafe("连接失败", $"服务端握手失败：{reason}\n请确认电脑端正在运行、Token 是否正确。");
                 return;
             }
 
@@ -239,10 +250,9 @@ public partial class MainPage : ContentPage
             // 启动前台服务保活（防止锁屏后系统冻结网络）
             StartForegroundService();
 
-            // 断流检测基准 + 看门狗（10 秒没音频帧 → 自动断开重连）
+            // 断流检测基准（监督循环负责断流检测与自动重连）
             _lastDataTicks = Environment.TickCount64;
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
-            _ = Task.Run(() => WatchdogLoopAsync(_cts.Token));
         }
         catch (OperationCanceledException)
         {
@@ -261,57 +271,73 @@ public partial class MainPage : ContentPage
         }
         finally
         {
+            _connecting = false;
             SetConnecting(false);
         }
     }
 
-    // ---- 断流看门狗：连接保持着但长时间没有音频帧 → 自动断开重连 ----
+    // ---- 监督循环：断流检测 + 自动重连（与连接级取消令牌解耦）----
+    //
+    // 只要 _autoReconnect 为 true 就一直活着：
+    //   连接中 → 检查断流（10 秒无音频帧 → 断开）
+    //   已断开 → 静默重连（最多 30 次），不弹任何框
+    // 手动点「断开」会把 _autoReconnect 置 false，循环随即停止干预。
 
-    async Task WatchdogLoopAsync(CancellationToken ct)
+    async Task SupervisorLoopAsync()
     {
-        try
+        while (true)
         {
-            while (!ct.IsCancellationRequested)
-            {
-                await Task.Delay(3000, ct);
-                if (!_connected) continue;
-
-                long idle = Environment.TickCount64 - Volatile.Read(ref _lastDataTicks);
-                if (idle < StallTimeoutMs) continue;
-
-                Android.Util.Log.Warn("A2P", $"No audio data for {idle}ms -> auto reconnect");
-                MainThread.BeginInvokeOnMainThread(() =>
-                    StatusLabel.Text = "长时间未收到音频，自动重连…");
-                Disconnect();
-                break;
-            }
-        }
-        catch (OperationCanceledException) { }
-
-        // 自动重连（静默模式，最多 30 次）
-        var attempts = 0;
-        while (_autoReconnect && !_connected && attempts < 30 && _cts?.IsCancellationRequested != true)
-        {
-            attempts++;
-            MainThread.BeginInvokeOnMainThread(() =>
-                StatusLabel.Text = $"自动重连…（第 {attempts} 次）");
-            try { await Task.Delay(2000); } catch { return; }
-            if (!_autoReconnect || _connected) return;
             try
             {
-                await MainThread.InvokeOnMainThreadAsync(() => ConnectAsync(silent: true));
+                if (!_autoReconnect)
+                {
+                    await Task.Delay(1000);
+                    continue;
+                }
+
+                if (_connected)
+                {
+                    _reconnectAttempts = 0;
+                    long idle = Environment.TickCount64 - Volatile.Read(ref _lastDataTicks);
+                    if (idle >= StallTimeoutMs)
+                    {
+                        Android.Util.Log.Warn("A2P", $"No audio data for {idle}ms -> reconnect");
+                        MainThread.BeginInvokeOnMainThread(() =>
+                            StatusLabel.Text = "长时间未收到音频，自动重连…");
+                        Disconnect();
+                    }
+                }
+                else if (!_connecting)
+                {
+                    if (_reconnectAttempts >= 30)
+                    {
+                        _autoReconnect = false;
+                        MainThread.BeginInvokeOnMainThread(() =>
+                            StatusLabel.Text = "自动重连失败，请手动点「连接」");
+                    }
+                    else
+                    {
+                        _reconnectAttempts++;
+                        MainThread.BeginInvokeOnMainThread(() =>
+                            StatusLabel.Text = $"自动重连…（第 {_reconnectAttempts} 次）");
+                        await ConnectAsync(silent: true);
+                    }
+                }
             }
             catch (Exception ex)
             {
-                Android.Util.Log.Warn("A2P", $"reconnect attempt {attempts}: {ex.Message}");
+                Android.Util.Log.Warn("A2P", $"supervisor: {ex.Message}");
             }
+
+            try { await Task.Delay(1000); } catch { }
         }
-        if (attempts >= 30 && !_connected)
-        {
-            _autoReconnect = false;
-            MainThread.BeginInvokeOnMainThread(() =>
-                StatusLabel.Text = "自动重连失败，请手动点「连接」");
-        }
+    }
+
+    void StartSupervisor()
+    {
+        if (_supervisorRunning) return;
+        _supervisorRunning = true;
+        _ = Task.Run(SupervisorLoopAsync);
     }
 
     async Task ShowAlertSafe(string title, string message)
@@ -401,11 +427,11 @@ public partial class MainPage : ContentPage
         finally
         {
             var wasConnected = _connected;
-            MainThread.BeginInvokeOnMainThread(async () =>
+            MainThread.BeginInvokeOnMainThread(() =>
             {
-                StatusLabel.Text = errorMessage ?? "已断开";
+                // 只更新状态文字，不弹框——自动重连由监督循环负责
                 if (errorMessage != null)
-                    await ShowAlertSafe("连接已断开", errorMessage + "\n\n点击「连接」可重新连接。");
+                    StatusLabel.Text = errorMessage;
                 if (wasConnected) Disconnect();
             });
         }

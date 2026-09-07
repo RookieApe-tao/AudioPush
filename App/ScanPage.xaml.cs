@@ -16,20 +16,46 @@ public partial class ScanPage : ContentPage
 
     void OnBarcodesDetected(object? sender, object e)
     {
-        var first = (e as dynamic)?.Results?[0];
-        string? value = first?.Value;
-        if (value == null || _handled) return;
-        _handled = true;
-
-        MainThread.BeginInvokeOnMainThread(async () =>
+        try
         {
-            _onScanned(value);
-            await Navigation.PopAsync();
-        });
+            if (_handled) return;
+
+            string? value = null;
+            try
+            {
+                var results = (e as dynamic)?.Results;
+                if (results != null && results.Count > 0)
+                    value = (string?)results[0].Value;
+            }
+            catch (Exception ex)
+            {
+                Android.Util.Log.Warn("A2P", $"barcode dynamic parse: {ex.Message}");
+            }
+
+            if (string.IsNullOrEmpty(value) || _handled) return;
+            _handled = true;
+
+            MainThread.BeginInvokeOnMainThread(async () =>
+            {
+                try
+                {
+                    _onScanned(value!);
+                    await Navigation.PopAsync();
+                }
+                catch (Exception ex)
+                {
+                    Android.Util.Log.Error("A2P", $"scan callback: {ex}");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Error("A2P", $"barcode handler: {ex}");
+        }
     }
 
     async void OnCancelClicked(object? sender, EventArgs e)
     {
-        await Navigation.PopAsync();
+        try { await Navigation.PopAsync(); } catch { }
     }
 }

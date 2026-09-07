@@ -46,16 +46,24 @@ public partial class MainPage : ContentPage
 
     async void OnScanClicked(object? sender, EventArgs e)
     {
-        // 请求相机权限
-        var status = await Permissions.RequestAsync<Permissions.Camera>();
-        if (status != PermissionStatus.Granted)
+        try
         {
-            StatusLabel.Text = "需要相机权限才能扫码";
-            return;
-        }
+            // 请求相机权限
+            var status = await Permissions.RequestAsync<Permissions.Camera>();
+            if (status != PermissionStatus.Granted)
+            {
+                StatusLabel.Text = "需要相机权限才能扫码";
+                return;
+            }
 
-        // 跳转扫码页面
-        await Navigation.PushAsync(new ScanPage(OnQrCodeScanned));
+            // 跳转扫码页面
+            await Navigation.PushAsync(new ScanPage(OnQrCodeScanned));
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text = $"扫码启动失败: {ex.Message}";
+            Android.Util.Log.Error("A2P", $"scan start: {ex}");
+        }
     }
 
     void OnQrCodeScanned(string text)
@@ -119,6 +127,20 @@ public partial class MainPage : ContentPage
         SetConnecting(true);
         StatusLabel.Text = "连接中…";
 
+        // Android 13+ 运行时申请通知权限（前台服务通知需要）
+        try
+        {
+            var notifStatus = await Permissions.RequestAsync<Permissions.PostNotifications>();
+            Android.Util.Log.Info("A2P", $"Notification permission: {notifStatus}");
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Warn("A2P", $"Notification permission request failed: {ex.Message}");
+        }
+
+        // 请求忽略电池优化（防 MIUI/Doze 冻结网络），只弹一次系统框
+        RequestIgnoreBatteryOptimization();
+
         try
         {
             _cts = new CancellationTokenSource();
@@ -127,8 +149,17 @@ public partial class MainPage : ContentPage
             Android.Util.Log.Info("A2P", $"Connecting to {host}:{port}");
 
             // 直接用 TCP 连接 + 手写 WebSocket 握手，绕过 ClientWebSocket 的严格 HTTP 验证
+            int portNum;
+            if (!int.TryParse(port, out portNum) || portNum < 1 || portNum > 65535)
+            {
+                StatusLabel.Text = "端口格式不正确";
+                SetConnecting(false);
+                return;
+            }
+
             var tcp = new System.Net.Sockets.TcpClient();
-            await tcp.ConnectAsync(host, int.Parse(port), _cts.Token);
+            await tcp.ConnectAsync(host, portNum, _cts.Token);
+            _tcp = tcp;   // 交给 Disconnect 统一释放
             var ns = tcp.GetStream();
 
             // 发送 WebSocket 升级请求
@@ -141,10 +172,19 @@ public partial class MainPage : ContentPage
             // 读取响应（等待 101）
             var respBuf = new byte[4096];
             int respLen = 0;
-            var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var handshakeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, handshakeTimeout.Token);
             while (respLen < respBuf.Length)
             {
-                int n = await ns.ReadAsync(respBuf.AsMemory(respLen, respBuf.Length - respLen), timeout.Token);
+                int n;
+                try
+                {
+                    n = await ns.ReadAsync(respBuf.AsMemory(respLen, respBuf.Length - respLen), readCts.Token);
+                }
+                catch (OperationCanceledException) when (!readCts.Token.IsCancellationRequested || handshakeTimeout.Token.IsCancellationRequested)
+                {
+                    break;   // 握手响应超时，走下面的格式判断
+                }
                 if (n <= 0) break;
                 respLen += n;
                 if (respLen >= 4 && System.Text.Encoding.ASCII.GetString(respBuf, 0, respLen).Contains("\r\n\r\n"))
@@ -156,7 +196,10 @@ public partial class MainPage : ContentPage
             if (!respText.Contains("101"))
             {
                 tcp.Close();
-                StatusLabel.Text = $"握手失败: {respText.Split('\n')[0]}";
+                _tcp = null;
+                var reason = respText.Length > 0 ? respText.Split('\n')[0].Trim() : "无响应";
+                StatusLabel.Text = $"握手失败: {reason}";
+                await ShowAlertSafe("连接失败", $"服务端握手失败：{reason}\n请确认电脑端正在运行、Token 是否正确。");
                 return;
             }
 
@@ -187,16 +230,35 @@ public partial class MainPage : ContentPage
 
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
         }
+        catch (OperationCanceledException)
+        {
+            StatusLabel.Text = "连接超时";
+            await ShowAlertSafe("连接失败", $"连接超时：无法连上 {host}:{port}\n请确认电脑端正在运行、IP 正确且手机与电脑在同一网络。");
+            Disconnect();
+        }
         catch (Exception ex)
         {
             Android.Util.Log.Error("A2P", $"ERROR: {ex}");
             StatusLabel.Text = $"连接失败: {ex.GetType().Name}: {ex.Message}";
+            await ShowAlertSafe("连接失败", $"{ex.Message}");
             Disconnect();
         }
         finally
         {
             SetConnecting(false);
         }
+    }
+
+    async Task ShowAlertSafe(string title, string message)
+    {
+        try
+        {
+            if (MainThread.IsMainThread)
+                await DisplayAlert(title, message, "好");
+            else
+                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert(title, message, "好"));
+        }
+        catch { }
     }
 
     void InitAudioPlayer()
@@ -232,6 +294,7 @@ public partial class MainPage : ContentPage
         var headerBuf = new byte[2];
         var opusBuf = new byte[1275];
         var pcmBuf = new short[FrameSamples * Channels];
+        string? errorMessage = null;
 
         try
         {
@@ -263,19 +326,21 @@ public partial class MainPage : ContentPage
         catch (OperationCanceledException) { }
         catch (WebSocketException ex)
         {
-            MainThread.BeginInvokeOnMainThread(() =>
-                StatusLabel.Text = $"连接断开: {ex.Message}");
+            errorMessage = $"连接断开: {ex.Message}";
         }
         catch (Exception ex)
         {
-            MainThread.BeginInvokeOnMainThread(() =>
-                StatusLabel.Text = $"错误: {ex.Message}");
+            errorMessage = $"错误: {ex.Message}";
         }
         finally
         {
-            MainThread.BeginInvokeOnMainThread(() =>
+            var wasConnected = _connected;
+            MainThread.BeginInvokeOnMainThread(async () =>
             {
-                if (_connected) Disconnect();
+                StatusLabel.Text = errorMessage ?? "已断开";
+                if (errorMessage != null)
+                    await ShowAlertSafe("连接已断开", errorMessage + "\n\n点击「连接」可重新连接。");
+                if (wasConnected) Disconnect();
             });
         }
     }
@@ -308,16 +373,17 @@ public partial class MainPage : ContentPage
     {
         _connected = false;
         _cts?.Cancel();
-        try { _ws?.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None).Wait(1000); } catch { }
+        // Abort 立即释放，不阻塞 UI 线程（服务端能容忍硬断开）
+        try { _ws?.Abort(); } catch { }
         _ws?.Dispose();
         _ws = null;
         try { _tcp?.Close(); } catch { }
         _tcp = null;
-        _audioTrack?.Stop();
-        _audioTrack?.Release();
+        try { _audioTrack?.Stop(); } catch { }
+        try { _audioTrack?.Release(); } catch { }
         _audioTrack?.Dispose();
         _audioTrack = null;
-        _decoder?.Dispose();
+        try { _decoder?.Dispose(); } catch { }
         _decoder = null;
 
         StopForegroundService();
@@ -342,6 +408,27 @@ public partial class MainPage : ContentPage
         catch (Exception ex)
         {
             Android.Util.Log.Warn("A2P", $"StartForegroundService failed: {ex.Message}");
+        }
+    }
+
+    void RequestIgnoreBatteryOptimization()
+    {
+        try
+        {
+            var pkg = Android.App.Application.Context.PackageName;
+            var pm = (Android.OS.PowerManager?)Android.App.Application.Context
+                .GetSystemService(Android.Content.Context.PowerService);
+            if (pkg == null || pm == null || pm.IsIgnoringBatteryOptimizations(pkg)) return;
+
+            var intent = new Android.Content.Intent(
+                Android.Provider.Settings.ActionRequestIgnoreBatteryOptimizations,
+                Android.Net.Uri.Parse("package:" + pkg));
+            Platform.CurrentActivity?.StartActivity(intent);
+            Android.Util.Log.Info("A2P", "Requested ignore battery optimizations");
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Warn("A2P", $"RequestIgnoreBatteryOptimization failed: {ex.Message}");
         }
     }
 

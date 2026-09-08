@@ -38,18 +38,39 @@ Console.WriteLine($" 采集: {(hub.SourceInfo == "初始化中…" ? "（未找�
 Console.WriteLine($" 鉴权: {(cfg.RequireAuth ? "已开启" : "关闭")} | 配置: {cfg.FilePath}");
 Console.WriteLine();
 
-// 生成控制台二维码（取第一个局域网 IP）
+// 生成二维码（取第一个局域网 IP）
 var primaryUrl = $"http://{(ips.Count > 0 ? ips[0] : "127.0.0.1")}:{cfg.Port}/?token={cfg.Token}";
 try
 {
     using var qrGen = new QRCoder.QRCodeGenerator();
     var qrData = qrGen.CreateQrCode(primaryUrl, QRCoder.QRCodeGenerator.ECCLevel.M);
-    var qrCode = new QRCoder.AsciiQRCode(qrData);
-    // 半块字符渲染（▀▄█）：横向 1 字符/模块，含静区约 37 列 × 19 行，窄窗口也不折行。
+
+    // PNG 真图片版：控制台字符二维码受字体渲染影响（块字符有细缝/宽高比失真）经常扫不出，
+    // 生成 PNG 到临时目录并自动用系统看图工具打开，手机扫码 100% 可识别
+    try
+    {
+        var pngQr = new QRCoder.PngByteQRCode(qrData);
+        var pngPath = Path.Combine(Path.GetTempPath(), "audio2phone-qr.png");
+        File.WriteAllBytes(pngPath, pngQr.GetGraphic(12));
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = pngPath,
+            UseShellExecute = true,
+        });
+        Console.WriteLine(" 手机扫码连接：已弹出二维码图片窗口（audio2phone-qr.png），用 App「扫码连接」扫一下即可");
+    }
+    catch (Exception ex)
+    {
+        Log.Warn("二维码图片生成/打开失败（不影响功能）: " + ex.Message);
+    }
+
+    // 控制台字符版（备用）：半块字符渲染（▀▄█）约 37 列 × 19 行，深色背景下可扫。
     // 注意：GetGraphicSmall 返回整段字符串（\n 分行），不是 string[]，不能直接 foreach 遍历；
     // string[] 版本是 GetLineByLineGraphic。
-    var qrText = qrCode.GetGraphicSmall(drawQuietZones: true, invert: false);
-    Console.WriteLine(" 手机扫码连接（用浏览器扫一扫）：");
+    var asciiQr = new QRCoder.AsciiQRCode(qrData);
+    var qrText = asciiQr.GetGraphicSmall(drawQuietZones: true, invert: false);
+    Console.WriteLine();
+    Console.WriteLine(" 若图片未弹出，可扫下方字符二维码：");
     Console.WriteLine();
     foreach (var line in qrText.Split('\n'))
         Console.WriteLine("  " + line.TrimEnd('\r'));

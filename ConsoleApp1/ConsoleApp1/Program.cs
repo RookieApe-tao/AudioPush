@@ -45,11 +45,14 @@ try
     using var qrGen = new QRCoder.QRCodeGenerator();
     var qrData = qrGen.CreateQrCode(primaryUrl, QRCoder.QRCodeGenerator.ECCLevel.M);
     var qrCode = new QRCoder.AsciiQRCode(qrData);
-    var lines = qrCode.GetGraphic(1, drawQuietZones: false);   // string[] 每行一个字符串
+    // 半块字符渲染（▀▄█）：横向 1 字符/模块，含静区约 37 列 × 19 行，窄窗口也不折行。
+    // 注意：GetGraphicSmall 返回整段字符串（\n 分行），不是 string[]，不能直接 foreach 遍历；
+    // string[] 版本是 GetLineByLineGraphic。
+    var qrText = qrCode.GetGraphicSmall(drawQuietZones: true, invert: false);
     Console.WriteLine(" 手机扫码连接（用浏览器扫一扫）：");
     Console.WriteLine();
-    foreach (var line in lines)
-        Console.WriteLine("   " + line);
+    foreach (var line in qrText.Split('\n'))
+        Console.WriteLine("  " + line.TrimEnd('\r'));
     Console.WriteLine();
 }
 catch (Exception ex)
